@@ -1,13 +1,11 @@
-/*
-===========================================================
-== DỊCH VỤ CHUYẾN ĐI (TripService)
-== Database: trip_db
-== Trách nhiệm: Quản lý chuyến đi, định tuyến, thanh toán, đánh giá.
-===========================================================
-*/
+-- ===========================================================
+-- DATABASE: trip_db
+-- DỊCH VỤ: TripService
+-- Phụ thuộc: user_db (users, driver_profiles, vehicles)
+-- ===========================================================
 
--- Trigger cập nhật updated_at
-CREATE OR REPLACE FUNCTION update_timestamp()
+-- === HÀM TRIGGER cập nhật updated_at ===
+CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = CURRENT_TIMESTAMP;
@@ -15,93 +13,130 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-------------------------------------------------------------
+-- ===========================================================
 -- BẢNG TRIPS
-------------------------------------------------------------
+-- ===========================================================
 CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    passenger_id UUID NOT NULL,    -- Tham chiếu đến users.id
-    driver_id UUID,                -- Tham chiếu đến driver_profiles.driver_id
-    vehicle_id UUID,               -- Tham chiếu đến vehicles.id
-    start_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    end_time TIMESTAMPTZ,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'accepted', 'in_progress', 'completed', 'cancelled')),
+
+    passenger_id UUID NOT NULL, -- FK -> users.id
+    driver_id UUID,             -- FK -> driver_profiles.driver_id
+    vehicle_id UUID,            -- FK -> vehicles.id
+
+    status VARCHAR(30) NOT NULL DEFAULT 'requested'
+        CHECK (status IN ('requested', 'accepted', 'in_progress', 'completed', 'cancelled')),
+
+    -- Địa điểm bắt đầu và kết thúc
+    start_location_address TEXT NOT NULL,
+    start_lat NUMERIC(10,8) NOT NULL CHECK (start_lat BETWEEN -90 AND 90),
+    start_lng NUMERIC(11,8) NOT NULL CHECK (start_lng BETWEEN -180 AND 180),
+    end_location_address TEXT NOT NULL,
+    end_lat NUMERIC(10,8) NOT NULL CHECK (end_lat BETWEEN -90 AND 90),
+    end_lng NUMERIC(11,8) NOT NULL CHECK (end_lng BETWEEN -180 AND 180),
+
+    -- Chi tiết chuyến
     estimated_fare NUMERIC(10,2) CHECK (estimated_fare >= 0),
-    actual_fare NUMERIC(10,2) CHECK (actual_fare >= 0),
-    distance_km NUMERIC(8,2) CHECK (distance_km >= 0),
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (passenger_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY (driver_id) REFERENCES driver_profiles(driver_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL ON UPDATE CASCADE
+    final_fare NUMERIC(10,2) CHECK (final_fare >= 0),
+    distance_km NUMERIC(6,2) CHECK (distance_km >= 0),
+    duration_min NUMERIC(6,2) CHECK (duration_min >= 0),
+
+    requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    accepted_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TRIGGER trg_trips_updated_at
 BEFORE UPDATE ON trips
 FOR EACH ROW
-EXECUTE FUNCTION update_timestamp();
+EXECUTE FUNCTION update_updated_at_column();
 
-------------------------------------------------------------
--- BẢNG TRIP_LOCATIONS
-------------------------------------------------------------
-CREATE TABLE trip_locations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    trip_id UUID NOT NULL,
-    pickup_address TEXT NOT NULL,
-    pickup_lat NUMERIC(10,6),
-    pickup_lng NUMERIC(10,6),
-    dropoff_address TEXT,
-    dropoff_lat NUMERIC(10,6),
-    dropoff_lng NUMERIC(10,6),
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE
-);
 
-------------------------------------------------------------
--- BẢNG TRIP_PAYMENTS
-------------------------------------------------------------
-CREATE TABLE trip_payments (
+-- ===========================================================
+-- BẢNG BILLS
+-- ===========================================================
+CREATE TABLE bills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL UNIQUE,
-    payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('cash', 'credit_card', 'wallet')),
+    passenger_id UUID NOT NULL,
+    driver_id UUID NOT NULL,
     amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
-    payment_status VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
-    transaction_id VARCHAR(100) UNIQUE,
-    paid_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE
+    payment_method VARCHAR(50) NOT NULL CHECK (payment_method <> ''),
+    status VARCHAR(20) DEFAULT 'pending'
+        CHECK (status IN ('pending', 'completed', 'failed')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TRIGGER trg_trip_payments_updated_at
-BEFORE UPDATE ON trip_payments
-FOR EACH ROW
-EXECUTE FUNCTION update_timestamp();
 
-------------------------------------------------------------
--- BẢNG TRIP_RATINGS
-------------------------------------------------------------
-CREATE TABLE trip_ratings (
+-- ===========================================================
+-- BẢNG TRIP_REVIEWS
+-- ===========================================================
+CREATE TABLE trip_reviews (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    trip_id UUID NOT NULL,
-    passenger_id UUID NOT NULL, -- user đánh giá tài xế
-    driver_id UUID NOT NULL,    -- tài xế được đánh giá
-    rating NUMERIC(2,1) CHECK (rating BETWEEN 1 AND 5),
-    comment TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY (passenger_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY (driver_id) REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE
+    trip_id UUID NOT NULL UNIQUE,
+    passenger_id UUID NOT NULL,
+    driver_id UUID NOT NULL,
+    rating_for_driver SMALLINT CHECK (rating_for_driver BETWEEN 1 AND 5),
+    comment_for_driver TEXT,
+    rating_for_passenger SMALLINT CHECK (rating_for_passenger BETWEEN 1 AND 5),
+    comment_for_passenger TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-------------------------------------------------------------
--- INDEXES
-------------------------------------------------------------
+
+-- ===========================================================
+-- RÀNG BUỘC KHÓA NGOẠI (Foreign Keys)
+-- ===========================================================
+ALTER TABLE trips
+ADD CONSTRAINT fk_trips_passenger FOREIGN KEY (passenger_id)
+    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE trips
+ADD CONSTRAINT fk_trips_driver FOREIGN KEY (driver_id)
+    REFERENCES driver_profiles(driver_id) ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE trips
+ADD CONSTRAINT fk_trips_vehicle FOREIGN KEY (vehicle_id)
+    REFERENCES vehicles(id) ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE bills
+ADD CONSTRAINT fk_bills_trip FOREIGN KEY (trip_id)
+    REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE bills
+ADD CONSTRAINT fk_bills_passenger FOREIGN KEY (passenger_id)
+    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE bills
+ADD CONSTRAINT fk_bills_driver FOREIGN KEY (driver_id)
+    REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE trip_reviews
+ADD CONSTRAINT fk_reviews_trip FOREIGN KEY (trip_id)
+    REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE trip_reviews
+ADD CONSTRAINT fk_reviews_passenger FOREIGN KEY (passenger_id)
+    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE trip_reviews
+ADD CONSTRAINT fk_reviews_driver FOREIGN KEY (driver_id)
+    REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+
+-- ===========================================================
+-- INDEXES TỐI ƯU
+-- ===========================================================
 CREATE INDEX idx_trips_passenger_id ON trips (passenger_id);
 CREATE INDEX idx_trips_driver_id ON trips (driver_id);
 CREATE INDEX idx_trips_status ON trips (status);
-CREATE INDEX idx_trip_payments_trip_id ON trip_payments (trip_id);
-CREATE INDEX idx_trip_ratings_trip_id ON trip_ratings (trip_id);
-CREATE INDEX idx_trip_locations_trip_id ON trip_locations (trip_id);
+
+CREATE INDEX idx_bills_trip_id ON bills (trip_id);
+CREATE INDEX idx_reviews_trip_id ON trip_reviews (trip_id);
+CREATE INDEX idx_reviews_driver_id ON trip_reviews (driver_id);
+
+-- ===========================================================
+-- HOÀN TẤT CẤU TRÚC TRIP_DB
+-- ===========================================================
