@@ -1,13 +1,13 @@
 /*
 ===========================================================
-== DỊCH VỤ NGƯỜI DÙNG (UserService)
-== Database: user_db
-== Trách nhiệm: Quản lý hành khách, tài xế, xe, xác thực.
+== DỊCH VỤ CHUYẾN ĐI (TripService)
+== Database: trip_db
+== Trách nhiệm: Quản lý chuyến đi, định tuyến, thanh toán, đánh giá.
 ===========================================================
 */
 
--- === Trigger cập nhật cột updated_at ===
-CREATE OR REPLACE FUNCTION update_updated_at_column()
+-- Trigger cập nhật updated_at
+CREATE OR REPLACE FUNCTION update_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = CURRENT_TIMESTAMP;
@@ -15,85 +15,93 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- === BẢNG USERS ===
-CREATE TABLE users (
+------------------------------------------------------------
+-- BẢNG TRIPS
+------------------------------------------------------------
+CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL CHECK (email <> ''),
-    phone_number VARCHAR(20) UNIQUE CHECK (phone_number ~ '^[0-9+\-() ]*$'),
-    password_hash VARCHAR(255),
-    full_name VARCHAR(100) NOT NULL CHECK (full_name <> ''),
-    role VARCHAR(20) NOT NULL DEFAULT 'passenger'
-        CHECK (role IN ('passenger', 'driver', 'admin')),
-    is_verified BOOLEAN NOT NULL DEFAULT false,
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_users_time CHECK (updated_at >= created_at)
+    passenger_id UUID NOT NULL,    -- Tham chiếu đến users.id
+    driver_id UUID,                -- Tham chiếu đến driver_profiles.driver_id
+    vehicle_id UUID,               -- Tham chiếu đến vehicles.id
+    start_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    end_time TIMESTAMPTZ,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'in_progress', 'completed', 'cancelled')),
+    estimated_fare NUMERIC(10,2) CHECK (estimated_fare >= 0),
+    actual_fare NUMERIC(10,2) CHECK (actual_fare >= 0),
+    distance_km NUMERIC(8,2) CHECK (distance_km >= 0),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (passenger_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (driver_id) REFERENCES driver_profiles(driver_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE TRIGGER trg_users_updated_at
-BEFORE UPDATE ON users
+CREATE TRIGGER trg_trips_updated_at
+BEFORE UPDATE ON trips
 FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
+EXECUTE FUNCTION update_timestamp();
 
-
--- === BẢNG DRIVER_PROFILES ===
-CREATE TABLE driver_profiles (
-    driver_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- định danh tài xế (sẽ trùng logic với trips.driver_id)
-    user_id UUID NOT NULL UNIQUE, -- liên kết user gốc
-    license_number VARCHAR(100) UNIQUE NOT NULL CHECK (license_number <> ''),
-    license_expiry DATE,
-    approval_status VARCHAR(20) DEFAULT 'pending'
-        CHECK (approval_status IN ('pending', 'approved', 'rejected')),
-    rating_avg NUMERIC(3,2) DEFAULT 0.0 CHECK (rating_avg >= 0 AND rating_avg <= 5),
-    total_trips INT DEFAULT 0 CHECK (total_trips >= 0),
-    profile_photo_url VARCHAR(512),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+------------------------------------------------------------
+-- BẢNG TRIP_LOCATIONS
+------------------------------------------------------------
+CREATE TABLE trip_locations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL,
+    pickup_address TEXT NOT NULL,
+    pickup_lat NUMERIC(10,6),
+    pickup_lng NUMERIC(10,6),
+    dropoff_address TEXT,
+    dropoff_lat NUMERIC(10,6),
+    dropoff_lng NUMERIC(10,6),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-CREATE TRIGGER trg_driver_profiles_updated_at
-BEFORE UPDATE ON driver_profiles
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
-
--- === BẢNG VEHICLES ===
-CREATE TABLE vehicles (
+------------------------------------------------------------
+-- BẢNG TRIP_PAYMENTS
+------------------------------------------------------------
+CREATE TABLE trip_payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    driver_id UUID NOT NULL, -- FK logic (tham chiếu driver_profiles.driver_id)
-    license_plate VARCHAR(20) UNIQUE NOT NULL CHECK (license_plate <> ''),
-    model VARCHAR(100),
-    color VARCHAR(50),
-    year SMALLINT CHECK (year BETWEEN 1980 AND EXTRACT(YEAR FROM CURRENT_DATE) + 1),
-    is_active BOOLEAN DEFAULT false,
-    registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    trip_id UUID NOT NULL UNIQUE,
+    payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('cash', 'credit_card', 'wallet')),
+    amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
+    transaction_id VARCHAR(100) UNIQUE,
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TRIGGER trg_trip_payments_updated_at
+BEFORE UPDATE ON trip_payments
+FOR EACH ROW
+EXECUTE FUNCTION update_timestamp();
+
+------------------------------------------------------------
+-- BẢNG TRIP_RATINGS
+------------------------------------------------------------
+CREATE TABLE trip_ratings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL,
+    passenger_id UUID NOT NULL, -- user đánh giá tài xế
+    driver_id UUID NOT NULL,    -- tài xế được đánh giá
+    rating NUMERIC(2,1) CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (passenger_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (driver_id) REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-CREATE TRIGGER trg_vehicles_updated_at
-BEFORE UPDATE ON vehicles
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
-
--- === BẢNG AUTH_PROVIDERS (OAuth) ===
-CREATE TABLE user_auth_providers (
-    user_id UUID NOT NULL,
-    provider VARCHAR(50) NOT NULL CHECK (provider IN ('local', 'google', 'facebook')),
-    provider_user_id TEXT NOT NULL CHECK (provider_user_id <> ''),
-    PRIMARY KEY (user_id, provider),
-    UNIQUE (provider, provider_user_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
-);
-
--- === INDEXES ===
-CREATE INDEX idx_users_email_lower ON users (LOWER(email));
-CREATE INDEX idx_driver_profiles_status ON driver_profiles (approval_status);
-CREATE INDEX idx_driver_profiles_user_id ON driver_profiles (user_id);
-CREATE INDEX idx_vehicles_driver_id ON vehicles (driver_id);
-CREATE UNIQUE INDEX idx_one_active_vehicle_per_driver
-ON vehicles (driver_id)
-WHERE (is_active = true);
+------------------------------------------------------------
+-- INDEXES
+------------------------------------------------------------
+CREATE INDEX idx_trips_passenger_id ON trips (passenger_id);
+CREATE INDEX idx_trips_driver_id ON trips (driver_id);
+CREATE INDEX idx_trips_status ON trips (status);
+CREATE INDEX idx_trip_payments_trip_id ON trip_payments (trip_id);
+CREATE INDEX idx_trip_ratings_trip_id ON trip_ratings (trip_id);
+CREATE INDEX idx_trip_locations_trip_id ON trip_locations (trip_id);
