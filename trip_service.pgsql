@@ -1,7 +1,6 @@
 -- ===========================================================
 -- DATABASE: trip_db
--- DỊCH VỤ: TripService
--- Phụ thuộc: user_db (users, driver_profiles, vehicles)
+-- DỊCH VỤ: TripService (tách biệt với UserService)
 -- ===========================================================
 
 -- === HÀM TRIGGER cập nhật updated_at ===
@@ -13,20 +12,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
 -- ===========================================================
 -- BẢNG TRIPS
 -- ===========================================================
 CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    passenger_id UUID NOT NULL, -- FK -> users.id
-    driver_id UUID,             -- FK -> driver_profiles.driver_id
-    vehicle_id UUID,            -- FK -> vehicles.id
+    passenger_id UUID NOT NULL,  -- UUID người đi (đồng bộ từ UserService)
+    driver_id UUID,              -- UUID tài xế (đồng bộ từ UserService)
+    vehicle_id UUID,             -- UUID xe (đồng bộ từ VehicleService)
 
     status VARCHAR(30) NOT NULL DEFAULT 'requested'
         CHECK (status IN ('requested', 'accepted', 'in_progress', 'completed', 'cancelled')),
 
-    -- Địa điểm bắt đầu và kết thúc
+    -- Địa điểm bắt đầu & kết thúc
     start_location_address TEXT NOT NULL,
     start_lat NUMERIC(10,8) NOT NULL CHECK (start_lat BETWEEN -90 AND 90),
     start_lng NUMERIC(11,8) NOT NULL CHECK (start_lng BETWEEN -180 AND 180),
@@ -59,9 +59,9 @@ EXECUTE FUNCTION update_updated_at_column();
 -- ===========================================================
 CREATE TABLE bills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    trip_id UUID NOT NULL UNIQUE,
-    passenger_id UUID NOT NULL,
-    driver_id UUID NOT NULL,
+    trip_id UUID NOT NULL UNIQUE,   -- FK logic sang trips (nội bộ)
+    passenger_id UUID NOT NULL,     -- UUID từ UserService
+    driver_id UUID NOT NULL,        -- UUID từ UserService
     amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
     payment_method VARCHAR(50) NOT NULL CHECK (payment_method <> ''),
     status VARCHAR(20) DEFAULT 'pending'
@@ -87,43 +87,15 @@ CREATE TABLE trip_reviews (
 
 
 -- ===========================================================
--- RÀNG BUỘC KHÓA NGOẠI (Foreign Keys)
+-- QUAN HỆ NỘI BỘ TRONG TRIP_DB
 -- ===========================================================
-ALTER TABLE trips
-ADD CONSTRAINT fk_trips_passenger FOREIGN KEY (passenger_id)
-    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE trips
-ADD CONSTRAINT fk_trips_driver FOREIGN KEY (driver_id)
-    REFERENCES driver_profiles(driver_id) ON DELETE SET NULL ON UPDATE CASCADE;
-
-ALTER TABLE trips
-ADD CONSTRAINT fk_trips_vehicle FOREIGN KEY (vehicle_id)
-    REFERENCES vehicles(id) ON DELETE SET NULL ON UPDATE CASCADE;
-
 ALTER TABLE bills
 ADD CONSTRAINT fk_bills_trip FOREIGN KEY (trip_id)
     REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE;
 
-ALTER TABLE bills
-ADD CONSTRAINT fk_bills_passenger FOREIGN KEY (passenger_id)
-    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE bills
-ADD CONSTRAINT fk_bills_driver FOREIGN KEY (driver_id)
-    REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE;
-
 ALTER TABLE trip_reviews
 ADD CONSTRAINT fk_reviews_trip FOREIGN KEY (trip_id)
     REFERENCES trips(id) ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE trip_reviews
-ADD CONSTRAINT fk_reviews_passenger FOREIGN KEY (passenger_id)
-    REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE trip_reviews
-ADD CONSTRAINT fk_reviews_driver FOREIGN KEY (driver_id)
-    REFERENCES driver_profiles(driver_id) ON DELETE CASCADE ON UPDATE CASCADE;
 
 
 -- ===========================================================
@@ -138,5 +110,9 @@ CREATE INDEX idx_reviews_trip_id ON trip_reviews (trip_id);
 CREATE INDEX idx_reviews_driver_id ON trip_reviews (driver_id);
 
 -- ===========================================================
--- HOÀN TẤT CẤU TRÚC TRIP_DB
+-- GHI CHÚ
+-- ===========================================================
+-- ⚙️ TripService chỉ lưu UUID từ các service khác (User, Vehicle)
+-- ⚙️ Không có FK cross-service → tránh coupling
+-- ⚙️ Các service giao tiếp qua API / message queue / event bus (ví dụ: Kafka, RabbitMQ)
 -- ===========================================================
