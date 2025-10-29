@@ -18,7 +18,7 @@ $$ LANGUAGE plpgsql;
 -- ===========================================================
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    firebase_id VARCHAR(128) UNIQUE,
+    firebase_uid VARCHAR(128) UNIQUE,
     email VARCHAR(255) UNIQUE NOT NULL,
     phone_number VARCHAR(20),
     full_name VARCHAR(100) NOT NULL,
