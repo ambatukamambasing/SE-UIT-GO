@@ -1,10 +1,10 @@
-# 🚗 UIT-Go Trip Microservice
+#  UIT-Go Trip Microservice
 
 > Microservice chịu trách nhiệm **quản lý chuyến đi, hóa đơn và đánh giá** trong hệ thống đặt xe UIT-Go.
 
 ---
 
-## 📘 1. Giới thiệu
+##  1. Giới thiệu
 
 `TripService` là một thành phần của hệ thống **UIT-Go Microservices**, được phát triển theo kiến trúc **tách biệt hoàn toàn**.  
 Service này đảm nhiệm việc:
@@ -14,7 +14,7 @@ Service này đảm nhiệm việc:
 
 ---
 
-## 🧱 2. Cấu trúc thư mục
+##  2. Cấu trúc thư mục
 
 ```bash
 trip-service/
