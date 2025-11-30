@@ -1,0 +1,15 @@
+# ... (giữ nguyên phần trên)
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '18.x' # Hoặc phiên bản Node.js bạn cần
+  displayName: 'Install Node.js'
+
+- script: npm install
+  displayName: 'Install dependencies'
+
+- script: npm run build
+  displayName: 'Run build'
